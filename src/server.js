@@ -1,7 +1,7 @@
 require('dotenv').config();
 const app = require('./app');
 const connectDB = require('./config/db');
-// const { initializeFirebase } = require('./config/firebase');
+const { initializeFirebase } = require('./config/firebase');
 
 const PORT = process.env.PORT || 5000;
 
@@ -11,7 +11,7 @@ const startServer = async () => {
     await connectDB();
 
     // Initialize Firebase Admin (uncomment when keys are ready)
-    // initializeFirebase();
+    initializeFirebase();
 
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);

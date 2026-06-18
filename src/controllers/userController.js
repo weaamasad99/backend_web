@@ -1,29 +1,81 @@
 const User = require('../models/User');
+const { getAuth } = require('firebase-admin/auth');
+const axios = require('axios');
 
-// @desc    Register a new user or login existing (handled by Firebase on frontend)
-// @route   POST /api/users/sync
-// @access  Private (Needs Firebase Token)
-const syncUser = async (req, res, next) => {
+// @desc    Register a new user
+// @route   POST /api/users/register
+// @access  Public
+const registerUser = async (req, res, next) => {
   try {
-    const { uid, email } = req.user;
-    const { name, role, profilePicture } = req.body;
+    const { email, password, name, role } = req.body;
 
-    let user = await User.findOne({ firebaseUid: uid });
-
-    if (!user) {
-      // Create new user if they don't exist in MongoDB yet
-      user = await User.create({
-        firebaseUid: uid,
-        email,
-        name: name || 'Anonymous User',
-        role: role || 'student',
-        profilePicture,
-      });
-      return res.status(201).json(user);
+    if (!email || !password || !name) {
+      res.status(400);
+      throw new Error('Please provide all required fields');
     }
 
-    // User exists, return user
-    res.status(200).json(user);
+    const userRecord = await getAuth().createUser({
+      email,
+      password,
+      displayName: name,
+    });
+
+    // 2. Save user in MongoDB
+    const user = await User.create({
+      firebaseUid: userRecord.uid,
+      email: userRecord.email,
+      name: userRecord.displayName || name,
+      role: role || 'student', // default role
+    });
+
+    res.status(201).json({ message: 'User created successfully', user });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Login user
+// @route   POST /api/users/login
+// @access  Public
+const loginUser = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      res.status(400);
+      throw new Error('Please provide email and password');
+    }
+
+    // 1. Authenticate with Firebase REST API
+    const apiKey = process.env.FIREBASE_API_KEY;
+    const authUrl = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`;
+    
+    let response;
+    try {
+      response = await axios.post(authUrl, {
+        email,
+        password,
+        returnSecureToken: true
+      });
+    } catch (err) {
+      res.status(401);
+      throw new Error('Invalid email or password');
+    }
+
+    const { idToken, localId } = response.data;
+
+    // 2. Fetch user from MongoDB
+    const user = await User.findOne({ firebaseUid: localId });
+
+    if (!user) {
+      res.status(404);
+      throw new Error('User not found in database');
+    }
+
+    res.status(200).json({
+      token: idToken,
+      user
+    });
   } catch (error) {
     next(error);
   }
@@ -48,6 +100,7 @@ const getUserProfile = async (req, res, next) => {
 };
 
 module.exports = {
-  syncUser,
+  registerUser,
+  loginUser,
   getUserProfile,
 };

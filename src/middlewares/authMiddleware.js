@@ -1,4 +1,4 @@
-const { admin } = require('../config/firebase');
+const { getAuth } = require('firebase-admin/auth');
 
 const protect = async (req, res, next) => {
   let token;
@@ -9,7 +9,7 @@ const protect = async (req, res, next) => {
       token = req.headers.authorization.split(' ')[1];
 
       // Verify token with Firebase
-      const decodedToken = await admin.auth().verifyIdToken(token);
+      const decodedToken = await getAuth().verifyIdToken(token);
 
       // Attach user info to request (from Firebase token)
       // Normally you would also find the user in MongoDB here:
