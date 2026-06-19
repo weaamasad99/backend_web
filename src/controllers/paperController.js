@@ -1,5 +1,6 @@
 const Paper = require('../models/Paper');
 const User = require('../models/User');
+const { generateSocraticResponse } = require('../services/geminiService');
 
 // @desc    Get all papers
 // @route   GET /api/papers
@@ -83,10 +84,44 @@ const deletePaper = async (req, res, next) => {
   }
 };
 
+// @desc    Query a paper using Socratic bot
+// @route   POST /api/papers/:id/query
+// @access  Private
+const queryPaper = async (req, res, next) => {
+  try {
+    const { question, guide } = req.body;
+    const paperId = req.params.id;
+
+    const paper = await Paper.findById(paperId);
+    if (!paper) {
+      res.status(404);
+      throw new Error('Paper not found');
+    }
+
+    let studentMessage = question;
+    if (guide && guide.trim()) {
+      studentMessage = `Student Question: ${question}\nGuidance Context/Focus: ${guide}`;
+    }
+
+    // Call Socratic Gemini response generator
+    const botResponseText = await generateSocraticResponse(
+      paper.content,
+      studentMessage,
+      []
+    );
+
+    res.json({ answer: botResponseText });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getPapers,
   getPaperById,
   uploadPaper,
   deletePaper,
+  queryPaper,
 };
+
 

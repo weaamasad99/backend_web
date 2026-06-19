@@ -76,7 +76,57 @@ const sendMessage = async (req, res, next) => {
   }
 };
 
+// @desc    Get all chats for the logged in user
+// @route   GET /api/chats
+// @access  Private
+const getUserChats = async (req, res, next) => {
+  try {
+    const user = await User.findOne({ firebaseUid: req.user.uid });
+
+    if (!user) {
+      res.status(404);
+      throw new Error('User not found');
+    }
+
+    const chats = await Chat.find({ student: user._id })
+      .populate('paper', 'title abstract authors year')
+      .sort({ updatedAt: -1 });
+
+    res.status(200).json(chats);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Delete a chat session
+// @route   DELETE /api/chats/:id
+// @access  Private
+const deleteChat = async (req, res, next) => {
+  try {
+    const chat = await Chat.findById(req.params.id);
+    if (!chat) {
+      res.status(404);
+      throw new Error('Chat session not found');
+    }
+
+    const user = await User.findOne({ firebaseUid: req.user.uid });
+    if (!user || chat.student.toString() !== user._id.toString()) {
+      res.status(401);
+      throw new Error('Not authorized to delete this chat session');
+    }
+
+    await Chat.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Chat session deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createOrGetChat,
   sendMessage,
+  getUserChats,
+  deleteChat,
 };
+
+
