@@ -1,7 +1,7 @@
 const Chat = require('../models/Chat');
 const Paper = require('../models/Paper');
 const User = require('../models/User');
-const { generateSocraticResponse } = require('../services/claudeService');
+const { generateSocraticResponse } = require('../services/geminiService');
 
 // @desc    Start or resume a chat for a paper
 // @route   POST /api/chats
