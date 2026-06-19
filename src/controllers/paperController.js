@@ -35,7 +35,7 @@ const getPaperById = async (req, res, next) => {
 // @access  Private (Lecturer only in a real app)
 const uploadPaper = async (req, res, next) => {
   try {
-    const { title, abstract, content, tags } = req.body;
+    const { title, abstract, content, tags, authors, year, methodology, keyFindings, topics } = req.body;
     
     // Find the current user in MongoDB using Firebase uid
     const user = await User.findOne({ firebaseUid: req.user.uid });
@@ -49,7 +49,12 @@ const uploadPaper = async (req, res, next) => {
       title,
       abstract,
       content,
-      tags,
+      tags: tags || topics || [],
+      authors: authors || ['Uploaded'],
+      year: year || new Date().getFullYear(),
+      methodology: methodology || 'Unknown',
+      keyFindings: keyFindings || [],
+      topics: topics || tags || [],
       uploadedBy: user._id,
     });
 
@@ -60,8 +65,28 @@ const uploadPaper = async (req, res, next) => {
   }
 };
 
+// @desc    Delete a paper
+// @route   DELETE /api/papers/:id
+// @access  Private
+const deletePaper = async (req, res, next) => {
+  try {
+    const paper = await Paper.findById(req.params.id);
+    if (paper) {
+      await Paper.findByIdAndDelete(req.params.id);
+      res.json({ message: 'Paper deleted successfully' });
+    } else {
+      res.status(404);
+      throw new Error('Paper not found');
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getPapers,
   getPaperById,
   uploadPaper,
+  deletePaper,
 };
+

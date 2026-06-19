@@ -2,6 +2,7 @@ require('dotenv').config();
 const app = require('./app');
 const connectDB = require('./config/db');
 const { initializeFirebase } = require('./config/firebase');
+const seedDatabase = require('./config/dbSeeder');
 
 const PORT = process.env.PORT || 5000;
 
@@ -9,6 +10,9 @@ const startServer = async () => {
   try {
     // Connect to MongoDB
     await connectDB();
+
+    // Seed mock papers and user if empty
+    await seedDatabase();
 
     // Initialize Firebase Admin (uncomment when keys are ready)
     initializeFirebase();
@@ -23,3 +27,4 @@ const startServer = async () => {
 };
 
 startServer();
+

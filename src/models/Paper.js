@@ -21,11 +21,38 @@ const paperSchema = mongoose.Schema(
     fileUrl: {
       type: String, // URL if stored in cloud storage (e.g. Firebase storage)
     },
+    authors: {
+      type: [String],
+      default: ['Unknown Author'],
+    },
+    year: {
+      type: Number,
+      default: () => new Date().getFullYear(),
+    },
+    citations: {
+      type: Number,
+      default: 0,
+    },
+    methodology: {
+      type: String,
+      default: 'Unknown',
+    },
+    keyFindings: {
+      type: [String],
+      default: [],
+    },
+    topics: {
+      type: [String],
+      default: [],
+    },
     tags: [String],
   },
   {
     timestamps: true,
+    collection: 'papers',
   }
 );
 
-module.exports = mongoose.model('Paper', paperSchema);
+module.exports = mongoose.model('Paper', paperSchema, 'papers');
+
+
