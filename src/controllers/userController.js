@@ -7,7 +7,7 @@ const axios = require('axios');
 // @access  Public
 const registerUser = async (req, res, next) => {
   try {
-    const { email, password, name, role } = req.body;
+    const { email, password, name, role, institution } = req.body;
 
     if (!email || !password || !name) {
       res.status(400);
@@ -26,6 +26,7 @@ const registerUser = async (req, res, next) => {
       email: userRecord.email,
       name: userRecord.displayName || name,
       role: role || 'student', // default role
+      institution: institution || '',
     });
 
     res.status(201).json({ message: 'User created successfully', user });
@@ -99,8 +100,34 @@ const getUserProfile = async (req, res, next) => {
   }
 };
 
+// @desc    Update user profile
+// @route   PUT /api/users/profile
+// @access  Private
+const updateUserProfile = async (req, res, next) => {
+  try {
+    const user = await User.findOne({ firebaseUid: req.user.uid });
+
+    if (user) {
+      user.name = req.body.name || user.name;
+      user.institution = req.body.institution !== undefined ? req.body.institution : user.institution;
+      
+      const updatedUser = await user.save();
+      res.json({
+        message: 'Profile updated successfully',
+        user: updatedUser
+      });
+    } else {
+      res.status(404);
+      throw new Error('User not found');
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
   getUserProfile,
+  updateUserProfile,
 };

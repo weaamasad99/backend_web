@@ -25,6 +25,10 @@ const userSchema = mongoose.Schema(
       type: String,
       default: '',
     },
+    institution: {
+      type: String,
+      default: '',
+    },
   },
   {
     timestamps: true,
