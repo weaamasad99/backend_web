@@ -10,6 +10,78 @@ const ai = new GoogleGenAI({
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 /**
+ * Extract structured metadata from raw paper text using Gemini JSON mode.
+ * @param {string} paperText Raw text extracted from the PDF
+ * @returns {Promise<object>} Structured metadata
+ */
+const extractPaperMetadata = async (paperText) => {
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('Gemini API key is not configured.');
+    }
+
+    // Use the first 25k characters to extract metadata (Abstract, Methodology, etc. are usually at the beginning)
+    const contextText = paperText.substring(0, 25000);
+
+    const prompt = `Analyze the following academic paper text and extract the structured metadata.
+Make sure the abstract is a concise overview, the methodology is a brief description of their methods,
+and key findings contain a few bullet points of what they discovered.
+
+Paper Text Snippet:
+${contextText}`;
+
+    const response = await ai.models.generateContent({
+      model: MODEL,
+      contents: prompt,
+      config: {
+        systemInstruction: 'You are an academic parser. Extract structured information from the provided paper snippet.',
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            title: { type: 'STRING', description: 'The title of the paper' },
+            abstract: { type: 'STRING', description: 'A concise summary of the abstract (up to 150 words)' },
+            authors: { 
+              type: 'ARRAY', 
+              items: { type: 'STRING' }, 
+              description: 'List of author names extracted from the paper (e.g. ["John Doe", "Jane Smith"])' 
+            },
+            year: { type: 'INTEGER', description: 'The publication year (e.g. 2024). Default to current year if not found.' },
+            methodology: { type: 'STRING', description: 'A summary of the methodology used in the study (up to 100 words)' },
+            keyFindings: { 
+              type: 'ARRAY', 
+              items: { type: 'STRING' }, 
+              description: '3-5 key findings or results of the study' 
+            },
+            topics: { 
+              type: 'ARRAY', 
+              items: { type: 'STRING' }, 
+              description: '3-4 topic keywords representing this paper (e.g. ["Machine Learning", "NLP"])' 
+            }
+          },
+          required: ['title', 'abstract', 'authors', 'year', 'methodology', 'keyFindings', 'topics']
+        }
+      }
+    });
+
+    const parsedData = JSON.parse(response.text);
+    return parsedData;
+  } catch (error) {
+    console.error('Gemini Metadata Extraction Error:', error);
+    // Return standard fallback object if AI parsing fails
+    return {
+      title: 'Parsed Document',
+      abstract: 'Extraction failed. Please review the document.',
+      authors: ['Unknown Author'],
+      year: new Date().getFullYear(),
+      methodology: 'Unknown methodology',
+      keyFindings: ['Text parsed successfully'],
+      topics: ['General']
+    };
+  }
+};
+
+/**
  * Generate a Socratic question based on the student's message and the paper context.
  * @param {string} paperContent The text of the paper
  * studentMessage The last message from the student
@@ -25,7 +97,7 @@ const generateSocraticResponse = async (paperContent, studentMessage, chatHistor
     const systemPrompt = `You are a Socratic tutor guiding a student through reading an academic paper.
 Your goal is to encourage critical thinking and deep understanding.
 Do not give direct answers immediately. Instead, ask guiding questions tailored to the student's level of understanding.
-Paper Context: ${paperContent.substring(0, 2000)}...`; // Truncated for token limits in this example
+Paper Context: ${paperContent.substring(0, 120000)}...`; // Substantially increased from 2000 for full paper comprehension
 
     // Gemini uses roles 'user' and 'model' (not 'assistant') and a parts[] shape
     const history = chatHistory.map((m) => ({
@@ -52,5 +124,6 @@ Paper Context: ${paperContent.substring(0, 2000)}...`; // Truncated for token li
 };
 
 module.exports = {
+  extractPaperMetadata,
   generateSocraticResponse,
 };
