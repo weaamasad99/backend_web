@@ -61,7 +61,8 @@ const sendMessage = async (req, res, next) => {
     const botResponseText = await generateSocraticResponse(
       chat.paper.content,
       text,
-      chatHistory.slice(0, -1) // Exclude the latest message we just added (it's passed as current message)
+      chatHistory.slice(0, -1), // Exclude the latest message we just added (it's passed as current message)
+      chat.paper.keywords || []
     );
 
     // 4. Save bot message
