@@ -6,8 +6,29 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-// Free-tier flash model; override with GEMINI_MODEL in .env if needed
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// Free-tier flash model; override with GEMINI_MODEL in .env if needed.
+// `gemini-flash-latest` is an always-available alias that avoids the periodic
+// 503 "high demand" spikes seen on pinned versions like gemini-2.5-flash.
+const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+
+// Retry transient errors (503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED) so a brief
+// model overload doesn't silently degrade extraction to fallback values.
+const generateWithRetry = async (params, retries = 2) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await ai.models.generateContent(params);
+    } catch (err) {
+      let status = '';
+      try { status = JSON.parse(err.message).error?.status; } catch { /* not JSON */ }
+      const transient = status === 'UNAVAILABLE' || status === 'RESOURCE_EXHAUSTED';
+      if (transient && attempt < retries) {
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+};
 
 /**
  * Extract structured metadata from raw paper text using Gemini JSON mode.
@@ -30,7 +51,7 @@ and key findings contain a few bullet points of what they discovered.
 Paper Text Snippet:
 ${contextText}`;
 
-    const response = await ai.models.generateContent({
+    const response = await generateWithRetry({
       model: MODEL,
       contents: prompt,
       config: {
@@ -53,13 +74,18 @@ ${contextText}`;
               items: { type: 'STRING' }, 
               description: '3-5 key findings or results of the study' 
             },
-            topics: { 
-              type: 'ARRAY', 
-              items: { type: 'STRING' }, 
-              description: '3-4 topic keywords representing this paper (e.g. ["Machine Learning", "NLP"])' 
+            topics: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+              description: '3-4 topic keywords representing this paper (e.g. ["Machine Learning", "NLP"])'
+            },
+            keywords: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+              description: 'Exactly 20 significant keywords/terms that best characterize this paper (technical terms, methods, concepts). Used to find related papers and drive study questions.'
             }
           },
-          required: ['title', 'abstract', 'authors', 'year', 'methodology', 'keyFindings', 'topics']
+          required: ['title', 'abstract', 'authors', 'year', 'methodology', 'keyFindings', 'topics', 'keywords']
         }
       }
     });
@@ -76,7 +102,8 @@ ${contextText}`;
       year: new Date().getFullYear(),
       methodology: 'Unknown methodology',
       keyFindings: ['Text parsed successfully'],
-      topics: ['General']
+      topics: ['General'],
+      keywords: []
     };
   }
 };
@@ -88,15 +115,21 @@ ${contextText}`;
  * @param {Array} chatHistory Previous chat messages
  * @returns {Promise<string>} The bot's response/question
  */
-const generateSocraticResponse = async (paperContent, studentMessage, chatHistory = []) => {
+const generateSocraticResponse = async (paperContent, studentMessage, chatHistory = [], keywords = []) => {
   try {
     if (!process.env.GEMINI_API_KEY) {
       return "Hello! I am the Socratic Bot. Please configure the Gemini API key to enable my brain.";
     }
 
+    // The PDF-derived keywords steer which concepts the tutor probes, and let it
+    // gauge the student's grasp of the paper's core terms.
+    const focusLine = keywords && keywords.length > 0
+      ? `\nKey concepts to probe and assess the student's understanding of: ${keywords.slice(0, 20).join(', ')}.`
+      : '';
+
     const systemPrompt = `You are a Socratic tutor guiding a student through reading an academic paper.
 Your goal is to encourage critical thinking and deep understanding.
-Do not give direct answers immediately. Instead, ask guiding questions tailored to the student's level of understanding.
+Do not give direct answers immediately. Instead, ask guiding questions tailored to the student's level of understanding.${focusLine}
 Paper Context: ${paperContent.substring(0, 120000)}...`; // Substantially increased from 2000 for full paper comprehension
 
     // Gemini uses roles 'user' and 'model' (not 'assistant') and a parts[] shape
@@ -110,7 +143,7 @@ Paper Context: ${paperContent.substring(0, 120000)}...`; // Substantially increa
       { role: 'user', parts: [{ text: studentMessage }] },
     ];
 
-    const response = await ai.models.generateContent({
+    const response = await generateWithRetry({
       model: MODEL,
       contents: contents,
       config: { systemInstruction: systemPrompt },

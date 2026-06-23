@@ -5,6 +5,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "backfill:data": "node src/scripts/backfillData.js",
+    "backfill:citations": "node src/scripts/backfillData.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
