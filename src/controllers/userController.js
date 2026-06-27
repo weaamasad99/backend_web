@@ -1,4 +1,6 @@
 const User = require('../models/User');
+const Paper = require('../models/Paper');
+const Chat = require('../models/Chat');
 const { getAuth } = require('firebase-admin/auth');
 const axios = require('axios');
 
@@ -50,7 +52,7 @@ const loginUser = async (req, res, next) => {
     // 1. Authenticate with Firebase REST API
     const apiKey = process.env.FIREBASE_API_KEY;
     const authUrl = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`;
-    
+
     let response;
     try {
       response = await axios.post(authUrl, {
@@ -110,7 +112,7 @@ const updateUserProfile = async (req, res, next) => {
     if (user) {
       user.name = req.body.name || user.name;
       user.institution = req.body.institution !== undefined ? req.body.institution : user.institution;
-      
+
       const updatedUser = await user.save();
       res.json({
         message: 'Profile updated successfully',
@@ -125,9 +127,59 @@ const updateUserProfile = async (req, res, next) => {
   }
 };
 
+// @desc    Get all students for lecturer dashboard
+// @route   GET /api/users/students
+// @access  Private (Lecturer only)
+const getStudents = async (req, res, next) => {
+  try {
+    const user = await User.findOne({ firebaseUid: req.user.uid });
+    
+    if (!user || user.role !== 'lecturer') {
+      res.status(403);
+      throw new Error('Not authorized as a lecturer');
+    }
+
+    const students = await User.find({ role: 'student' }).select('-firebaseUid -__v');
+    
+    const studentData = await Promise.all(students.map(async (student) => {
+      const papersCount = await Paper.countDocuments({ uploadedBy: student._id });
+      const chats = await Chat.find({ student: student._id }).sort({ updatedAt: -1 }).limit(1);
+      const lastActive = chats.length > 0 ? chats[0].updatedAt : student.updatedAt;
+
+      // Format date
+      const date = new Date(lastActive);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffHrs / 24);
+      let lastActiveStr = 'Just now';
+      if (diffDays > 0) {
+        lastActiveStr = `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+      } else if (diffHrs > 0) {
+        lastActiveStr = `${diffHrs} hour${diffHrs > 1 ? 's' : ''} ago`;
+      }
+
+      return {
+        id: student._id,
+        name: student.name,
+        email: student.email,
+        project: student.institution || 'Final Project',
+        papersAnalyzed: papersCount,
+        lastActive: lastActiveStr,
+        status: papersCount > 0 ? 'Active' : 'Review Needed',
+      };
+    }));
+
+    res.json(studentData);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
   getUserProfile,
   updateUserProfile,
+  getStudents,
 };

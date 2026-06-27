@@ -62,17 +62,17 @@ ${contextText}`;
           properties: {
             title: { type: 'STRING', description: 'The title of the paper' },
             abstract: { type: 'STRING', description: 'A concise summary of the abstract (up to 150 words)' },
-            authors: { 
-              type: 'ARRAY', 
-              items: { type: 'STRING' }, 
-              description: 'List of author names extracted from the paper (e.g. ["John Doe", "Jane Smith"])' 
+            authors: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+              description: 'List of author names extracted from the paper (e.g. ["John Doe", "Jane Smith"])'
             },
             year: { type: 'INTEGER', description: 'The publication year (e.g. 2024). Default to current year if not found.' },
             methodology: { type: 'STRING', description: 'A summary of the methodology used in the study (up to 100 words)' },
-            keyFindings: { 
-              type: 'ARRAY', 
-              items: { type: 'STRING' }, 
-              description: '3-5 key findings or results of the study' 
+            keyFindings: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+              description: '3-5 key findings or results of the study'
             },
             topics: {
               type: 'ARRAY',
