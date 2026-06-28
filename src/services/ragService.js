@@ -6,8 +6,8 @@ const ingestKey = () => process.env.GEMINI_INGEST_KEY || process.env.GEMINI_API_
 // Tunable RAG constants — adjust here, used everywhere.
 const CHUNK_SIZE = 1000;   // chars per chunk
 const CHUNK_OVERLAP = 150; // chars shared between adjacent chunks
-const EMBED_MODEL = 'text-embedding-004';
-const EMBED_DIMS = 768;
+const EMBED_MODEL = 'gemini-embedding-001';
+const EMBED_DIMS = 768; // request 768-dim output (model default is 3072)
 const TOP_K = 4;
 
 /** Split text into overlapping fixed-size character windows. */
@@ -50,7 +50,11 @@ async function embedTexts(texts, apiKey) {
 
   const out = [];
   for (const text of texts) {
-    const res = await ai.models.embedContent({ model: EMBED_MODEL, contents: text });
+    const res = await ai.models.embedContent({
+      model: EMBED_MODEL,
+      contents: text,
+      config: { outputDimensionality: EMBED_DIMS },
+    });
     const vec = res?.embeddings?.[0]?.values || res?.embedding?.values;
     if (!vec) throw new Error('Embedding response missing values.');
     out.push(vec);
