@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 
-const { getPapers, getPaperById, uploadPaper, deletePaper, queryPaper, getPaperSuggestions, getSuggestionsForPapers } = require('../controllers/paperController');
+const { getPapers, getPaperById, uploadPaper, deletePaper, queryPaper, getPaperSuggestions, getSuggestionsForPapers, ingestPaperById } = require('../controllers/paperController');
 const { analyzePapers } = require('../controllers/analysisController');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -24,6 +24,8 @@ router.route('/:id')
 
 router.route('/:id/query')
   .post(protect, queryPaper);
+
+router.post('/:id/ingest', protect, ingestPaperById);
 
 // Most popular related papers, derived from the paper's extracted keywords.
 router.get('/:id/suggestions', protect, getPaperSuggestions);

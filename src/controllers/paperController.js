@@ -285,6 +285,23 @@ const getSuggestionsForPapers = async (req, res, next) => {
   }
 };
 
+// @desc    Re-index a paper into the RAG store (manual backfill/refresh)
+// @route   POST /api/papers/:id/ingest
+// @access  Private
+const ingestPaperById = async (req, res, next) => {
+  try {
+    const paper = await Paper.findById(req.params.id);
+    if (!paper) {
+      res.status(404);
+      throw new Error('Paper not found');
+    }
+    const count = await ingestPaper(paper._id, paper.content, paper.uploadedBy);
+    res.json({ paperId: paper._id, chunks: count });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getPapers,
   getPaperById,
@@ -293,6 +310,7 @@ module.exports = {
   queryPaper,
   getPaperSuggestions,
   getSuggestionsForPapers,
+  ingestPaperById,
 };
 
 
