@@ -59,6 +59,7 @@ const sendMessage = async (req, res, next) => {
 
     // 3. Get bot response
     const botResponseText = await generateSocraticResponse(
+      chat.paper._id,
       chat.paper.content,
       text,
       chatHistory.slice(0, -1), // Exclude the latest message we just added (it's passed as current message)

@@ -2,6 +2,7 @@ const Paper = require('../models/Paper');
 const User = require('../models/User');
 const { generateSocraticResponse, extractPaperMetadata } = require('../services/geminiService');
 const { uploadPDFToCloudinary } = require('../services/cloudinaryService');
+const { ingestPaper } = require('../services/ragService');
 const { fetchCitationCount } = require('../services/citationService');
 const { fetchPopularPapersByKeywords } = require('../services/suggestionService');
 const { PDFParse } = require('pdf-parse');
@@ -134,6 +135,15 @@ const uploadPaper = async (req, res, next) => {
     });
 
     const createdPaper = await paper.save();
+
+    // Ingest into the RAG store. Failure must not fail the upload.
+    try {
+      const count = await ingestPaper(createdPaper._id, content, user._id);
+      console.log(`Ingested ${count} chunks for paper ${createdPaper._id}`);
+    } catch (ingestErr) {
+      console.error('RAG ingestion failed (paper still saved):', ingestErr.message);
+    }
+
     res.status(201).json(createdPaper);
   } catch (error) {
     next(error);
@@ -179,6 +189,7 @@ const queryPaper = async (req, res, next) => {
 
     // Call Socratic Gemini response generator
     const botResponseText = await generateSocraticResponse(
+      paper._id,
       paper.content,
       studentMessage,
       [],
