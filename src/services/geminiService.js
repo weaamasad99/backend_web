@@ -1,10 +1,12 @@
 const { GoogleGenAI } = require('@google/genai');
 
-// Note: Ensure GEMINI_API_KEY is set in your .env file.
-// Get a free key at https://aistudio.google.com/apikey
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
+// Separate keys isolate bursty ingestion from interactive chat quota.
+// Both fall back to the legacy GEMINI_API_KEY for backward compatibility.
+const CHAT_KEY = process.env.GEMINI_CHAT_KEY || process.env.GEMINI_API_KEY;
+const INGEST_KEY = process.env.GEMINI_INGEST_KEY || process.env.GEMINI_API_KEY;
+
+const chatAI = new GoogleGenAI({ apiKey: CHAT_KEY });
+const ingestAI = new GoogleGenAI({ apiKey: INGEST_KEY });
 
 // Free-tier flash model; override with GEMINI_MODEL in .env if needed.
 // `gemini-flash-latest` is an always-available alias that avoids the periodic
@@ -13,10 +15,10 @@ const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
 
 // Retry transient errors (503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED) so a brief
 // model overload doesn't silently degrade extraction to fallback values.
-const generateWithRetry = async (params, retries = 2) => {
+const generateWithRetry = async (client, params, retries = 2) => {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await ai.models.generateContent(params);
+      return await client.models.generateContent(params);
     } catch (err) {
       let status = '';
       try { status = JSON.parse(err.message).error?.status; } catch { /* not JSON */ }
@@ -37,7 +39,7 @@ const generateWithRetry = async (params, retries = 2) => {
  */
 const extractPaperMetadata = async (paperText) => {
   try {
-    if (!process.env.GEMINI_API_KEY) {
+    if (!INGEST_KEY) {
       throw new Error('Gemini API key is not configured.');
     }
 
@@ -51,7 +53,7 @@ and key findings contain a few bullet points of what they discovered.
 Paper Text Snippet:
 ${contextText}`;
 
-    const response = await generateWithRetry({
+    const response = await generateWithRetry(ingestAI, {
       model: MODEL,
       contents: prompt,
       config: {
@@ -117,7 +119,7 @@ ${contextText}`;
  */
 const generateSocraticResponse = async (paperContent, studentMessage, chatHistory = [], keywords = []) => {
   try {
-    if (!process.env.GEMINI_API_KEY) {
+    if (!CHAT_KEY) {
       return "Hello! I am the Socratic Bot. Please configure the Gemini API key to enable my brain.";
     }
 
@@ -143,7 +145,7 @@ Paper Context: ${paperContent.substring(0, 120000)}...`; // Substantially increa
       { role: 'user', parts: [{ text: studentMessage }] },
     ];
 
-    const response = await generateWithRetry({
+    const response = await generateWithRetry(chatAI, {
       model: MODEL,
       contents: contents,
       config: { systemInstruction: systemPrompt },
