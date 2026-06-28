@@ -1,4 +1,5 @@
 const { GoogleGenAI } = require('@google/genai');
+const { embedTexts, retrieveChunks, TOP_K } = require('./ragService');
 
 // Separate keys isolate bursty ingestion from interactive chat quota.
 // Both fall back to the legacy GEMINI_API_KEY for backward compatibility.
@@ -111,30 +112,43 @@ ${contextText}`;
 };
 
 /**
- * Generate a Socratic question based on the student's message and the paper context.
- * @param {string} paperContent The text of the paper
- * studentMessage The last message from the student
- * @param {Array} chatHistory Previous chat messages
- * @returns {Promise<string>} The bot's response/question
+ * Generate a Socratic question grounded in retrieved paper chunks (RAG).
+ * Falls back to truncated paperContent if retrieval yields nothing.
  */
-const generateSocraticResponse = async (paperContent, studentMessage, chatHistory = [], keywords = []) => {
+const generateSocraticResponse = async (paperId, paperContent, studentMessage, chatHistory = [], keywords = []) => {
   try {
     if (!CHAT_KEY) {
       return "Hello! I am the Socratic Bot. Please configure the Gemini API key to enable my brain.";
     }
 
-    // The PDF-derived keywords steer which concepts the tutor probes, and let it
-    // gauge the student's grasp of the paper's core terms.
+    // 1. Retrieve the most relevant chunks for this question (RAG).
+    let context = '';
+    try {
+      const [queryEmbedding] = await embedTexts([studentMessage], CHAT_KEY);
+      const hits = await retrieveChunks(paperId, queryEmbedding, TOP_K);
+      if (hits.length > 0) {
+        context = hits.map((h, i) => `[Excerpt ${i + 1}]\n${h.chunkText}`).join('\n\n');
+      }
+    } catch (ragErr) {
+      console.error('RAG retrieval failed, falling back to full content:', ragErr.message);
+    }
+
+    // 2. Fallback: no chunks yet (un-backfilled paper) or retrieval failed.
+    if (!context) {
+      context = (paperContent || '').substring(0, 120000);
+    }
+
     const focusLine = keywords && keywords.length > 0
       ? `\nKey concepts to probe and assess the student's understanding of: ${keywords.slice(0, 20).join(', ')}.`
       : '';
 
     const systemPrompt = `You are a Socratic tutor guiding a student through reading an academic paper.
 Your goal is to encourage critical thinking and deep understanding.
-Do not give direct answers immediately. Instead, ask guiding questions tailored to the student's level of understanding.${focusLine}
-Paper Context: ${paperContent.substring(0, 120000)}...`; // Substantially increased from 2000 for full paper comprehension
+Do not give direct answers immediately. Instead, ask guiding questions tailored to the student's level of understanding.
+Answer ONLY using the provided context excerpts; if the answer is not in them, say so and guide the student back to the text.${focusLine}
+Context excerpts from the paper:
+${context}`;
 
-    // Gemini uses roles 'user' and 'model' (not 'assistant') and a parts[] shape
     const history = chatHistory.map((m) => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }],
@@ -147,7 +161,7 @@ Paper Context: ${paperContent.substring(0, 120000)}...`; // Substantially increa
 
     const response = await generateWithRetry(chatAI, {
       model: MODEL,
-      contents: contents,
+      contents,
       config: { systemInstruction: systemPrompt },
     });
 
