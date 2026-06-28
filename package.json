@@ -7,7 +7,8 @@
     "dev": "nodemon src/server.js",
     "backfill:data": "node src/scripts/backfillData.js",
     "backfill:citations": "node src/scripts/backfillData.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "ingest:existing": "node src/scripts/ingestExisting.js",
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
