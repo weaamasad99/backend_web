@@ -8,7 +8,7 @@
     "backfill:data": "node src/scripts/backfillData.js",
     "backfill:citations": "node src/scripts/backfillData.js",
     "ingest:existing": "node src/scripts/ingestExisting.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
