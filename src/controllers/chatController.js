@@ -1,7 +1,8 @@
 const Chat = require('../models/Chat');
 const Paper = require('../models/Paper');
 const User = require('../models/User');
-const { generateSocraticResponse } = require('../services/geminiService');
+const { generateSocraticResponse, assessComprehension } = require('../services/geminiService');
+const { upsertProgress } = require('./progressController');
 
 // @desc    Start or resume a chat for a paper
 // @route   POST /api/chats
@@ -72,7 +73,24 @@ const sendMessage = async (req, res, next) => {
 
     await chat.save();
 
-    res.status(200).json(chat);
+    // 5. Assess the student's comprehension and persist it. Never block the reply.
+    let progress;
+    try {
+      const conversation = chat.messages.map((m) => ({
+        role: m.sender === 'user' ? 'user' : 'model',
+        text: m.text,
+      }));
+      const { score } = await assessComprehension(
+        chat.paper.keywords || [],
+        chat.paper.content || '',
+        conversation
+      );
+      progress = await upsertProgress(chat.student, chat.paper._id, score);
+    } catch (assessErr) {
+      console.error('Comprehension assessment failed (chat reply still sent):', assessErr.message);
+    }
+
+    res.status(200).json({ ...chat.toObject(), progress });
   } catch (error) {
     next(error);
   }
