@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { errorHandler } = require('./middlewares/errorHandler');
+const { globalLimiter } = require('./middlewares/rateLimiter');
 
 const app = express();
 
@@ -8,6 +9,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Apply global rate limiting to all requests
+app.use(globalLimiter);
 
 // Basic health check route
 app.get('/health', (req, res) => {
