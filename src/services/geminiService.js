@@ -1,5 +1,6 @@
 const { GoogleGenAI } = require('@google/genai');
 const { embedTexts, retrieveChunks, TOP_K } = require('./ragService');
+const { scoreToLevel } = require('./comprehensionService');
 
 // Separate keys isolate bursty ingestion from interactive chat quota.
 // Both fall back to the legacy GEMINI_API_KEY for backward compatibility.
@@ -173,7 +174,55 @@ ${context}`;
   }
 };
 
+/**
+ * Judge how well a student demonstrated understanding of a paper from the
+ * Socratic conversation. Uses the chat client + JSON mode.
+ * @param {string[]} keywords  Paper key concepts to assess against.
+ * @param {string} contextExcerpts  Relevant paper text (already truncated).
+ * @param {Array<{role:'user'|'model', text:string}>} conversation
+ * @returns {Promise<{score:number, level:string, rationale:string}>}
+ */
+const assessComprehension = async (keywords = [], contextExcerpts = '', conversation = []) => {
+  if (!CHAT_KEY) throw new Error('Gemini chat key is not configured.');
+
+  const transcript = conversation
+    .map((m) => `${m.role === 'model' ? 'Tutor' : 'Student'}: ${m.text}`)
+    .join('\n');
+
+  const prompt = `Assess the STUDENT's demonstrated understanding of this academic paper, based only on what the student said in the conversation.
+Key concepts to weigh: ${keywords.slice(0, 20).join(', ') || '(none provided)'}.
+Score 0-100: 0 = no understanding shown, 100 = mastery of the key concepts. Be strict; reward correct, specific, on-topic answers and penalize vague, wrong, or off-topic ones.
+
+Paper context:
+${(contextExcerpts || '').substring(0, 20000)}
+
+Conversation:
+${transcript}`;
+
+  const response = await generateWithRetry(chatAI, {
+    model: MODEL,
+    contents: prompt,
+    config: {
+      systemInstruction: 'You are a strict but fair academic examiner. Return only the requested JSON.',
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          score: { type: 'INTEGER', description: 'Comprehension score from 0 to 100.' },
+          rationale: { type: 'STRING', description: 'One sentence justifying the score.' },
+        },
+        required: ['score', 'rationale'],
+      },
+    },
+  });
+
+  const parsed = JSON.parse(response.text);
+  const score = Math.max(0, Math.min(100, Number(parsed.score) || 0));
+  return { score, level: scoreToLevel(score), rationale: parsed.rationale || '' };
+};
+
 module.exports = {
   extractPaperMetadata,
   generateSocraticResponse,
+  assessComprehension,
 };
