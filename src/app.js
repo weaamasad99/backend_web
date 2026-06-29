@@ -18,6 +18,7 @@ app.get('/health', (req, res) => {
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/papers', require('./routes/paperRoutes'));
 app.use('/api/chats', require('./routes/chatRoutes'));
+app.use('/api/progress', require('./routes/progressRoutes'));
 
 // Global Error Handler
 app.use(errorHandler);
