@@ -1,10 +1,11 @@
 const rateLimit = require('express-rate-limit');
 
 // 1. Global Limiter - Applies to all API routes
-// Limits each IP to 100 requests per 15 minutes
+// SPA makes many calls per session (papers, progress per chat message, chats,
+// suggestions); 100/15min throttled normal use, so raise it well above that.
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  max: 1000, // Limit each IP to 1000 requests per windowMs
   message: {
     message: 'Too many requests from this IP, please try again after 15 minutes'
   },
