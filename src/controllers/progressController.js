@@ -11,7 +11,7 @@ const upsertProgress = async (studentId, paperId, score) => {
   await Progress.findOneAndUpdate(
     { student: studentId, paper: paperId },
     { score, understandingLevel },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, setDefaultsOnInsert: true }
   );
   return { score, understandingLevel };
 };
