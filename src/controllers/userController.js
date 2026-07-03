@@ -132,6 +132,10 @@ const updateUserProfile = async (req, res, next) => {
     if (user) {
       user.name = req.body.name || user.name;
       user.institution = req.body.institution !== undefined ? req.body.institution : user.institution;
+      // Preferences — only overwrite when the client sends a value.
+      if (req.body.researchField !== undefined) user.researchField = req.body.researchField;
+      if (req.body.citationFormat !== undefined) user.citationFormat = req.body.citationFormat;
+      if (req.body.defaultDepth !== undefined) user.defaultDepth = req.body.defaultDepth;
 
       const updatedUser = await user.save();
       res.json({

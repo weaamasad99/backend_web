@@ -34,6 +34,21 @@ const userSchema = mongoose.Schema(
       type: String,
       default: '',
     },
+    // User preferences (persisted so they survive across devices/logins).
+    researchField: {
+      type: String,
+      default: '',
+    },
+    citationFormat: {
+      type: String,
+      enum: ['APA', 'MLA', 'Chicago'],
+      default: 'APA',
+    },
+    defaultDepth: {
+      type: Number,
+      enum: [1, 2, 3],
+      default: 2,
+    },
   },
   {
     timestamps: true,
