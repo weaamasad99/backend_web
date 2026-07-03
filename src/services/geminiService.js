@@ -201,7 +201,7 @@ ${contextText}`;
  * Generate a Socratic question grounded in retrieved paper chunks (RAG).
  * Falls back to truncated paperContent if retrieval yields nothing.
  */
-const generateSocraticResponse = async (paperId, paperContent, studentMessage, chatHistory = [], keywords = []) => {
+const generateSocraticResponse = async (paperId, paperContent, studentMessage, chatHistory = [], keywords = [], language = 'en') => {
   try {
     if (!CHAT_KEY) {
       return "Hello! I am the Socratic Bot. Please configure the Gemini API key to enable my brain.";
@@ -228,11 +228,17 @@ const generateSocraticResponse = async (paperId, paperContent, studentMessage, c
       ? `\nKey concepts to probe and assess the student's understanding of: ${keywords.slice(0, 20).join(', ')}.`
       : '';
 
+    // When the UI is in Hebrew, the tutor replies in Hebrew regardless of the
+    // language of the paper or the question.
+    const languageLine = language === 'he'
+      ? '\nRespond ONLY in Hebrew (עברית), even though the paper and question may be in English.'
+      : '';
+
     const systemPrompt = `You are a Socratic tutor guiding a student through reading an academic paper.
 Your goal is to encourage critical thinking and deep understanding.
 Do not give direct answers immediately. Instead, ask guiding questions tailored to the student's level of understanding.
 Answer ONLY using the provided context excerpts; if the answer is not in them, say so and guide the student back to the text.
-Write in plain prose only. Do NOT use Markdown, LaTeX, or math delimiters (no $...$, \\(...\\), backticks, or asterisks) — write variable names like X, D, C as plain letters.${focusLine}
+Write in plain prose only. Do NOT use Markdown, LaTeX, or math delimiters (no $...$, \\(...\\), backticks, or asterisks) — write variable names like X, D, C as plain letters.${focusLine}${languageLine}
 Context excerpts from the paper:
 ${context}`;
 

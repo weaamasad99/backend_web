@@ -176,7 +176,7 @@ const deletePaper = async (req, res, next) => {
 // @access  Private
 const queryPaper = async (req, res, next) => {
   try {
-    const { question, guide } = req.body;
+    const { question, guide, language } = req.body;
     const paperId = req.params.id;
 
     const paper = await Paper.findById(paperId);
@@ -196,7 +196,8 @@ const queryPaper = async (req, res, next) => {
       paper.content,
       studentMessage,
       [],
-      paper.keywords || []
+      paper.keywords || [],
+      language || 'en'
     );
 
     res.json({ answer: botResponseText });
