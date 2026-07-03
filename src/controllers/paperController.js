@@ -68,40 +68,34 @@ const uploadPaper = async (req, res, next) => {
         content = `Extracted from ${originalName} but text extraction failed.`;
       }
 
-      // 2. Upload the file buffer to Cloudinary
-      try {
-        const cloudinaryResult = await uploadPDFToCloudinary(pdfBuffer, originalName);
-        fileUrl = cloudinaryResult.secure_url;
-      } catch (err) {
-        console.error('Failed to upload PDF to Cloudinary:', err.message);
-        fileUrl = '#';
-      }
+      // 2 + 3. Upload to Cloudinary and extract metadata concurrently — they're
+      // independent and both slow, so awaiting them in parallel halves the wait.
+      const [cloudinaryResult, metadata] = await Promise.all([
+        uploadPDFToCloudinary(pdfBuffer, originalName).catch((err) => {
+          console.error('Failed to upload PDF to Cloudinary:', err.message);
+          return null;
+        }),
+        extractPaperMetadata(content).catch((err) => {
+          console.error('Failed to extract metadata with Gemini:', err.message);
+          return null;
+        }),
+      ]);
 
-      // 3. Query Gemini for structured metadata
-      try {
-        const metadata = await extractPaperMetadata(content);
-        title = metadata.title || originalName.replace('.pdf', '');
-        abstract = metadata.abstract || `Uploaded PDF document: ${originalName}`;
-        authors = metadata.authors && metadata.authors.length > 0 ? metadata.authors : ['Uploaded User'];
-        year = metadata.year || new Date().getFullYear();
-        methodology = metadata.methodology || 'Extracted methodology';
-        keyFindings = metadata.keyFindings && metadata.keyFindings.length > 0 ? metadata.keyFindings : ['Text parsed successfully'];
-        topics = metadata.topics && metadata.topics.length > 0 ? metadata.topics : ['Uploaded'];
-        keywords = metadata.keywords && metadata.keywords.length > 0 ? metadata.keywords : topics;
-      } catch (err) {
-        console.error('Failed to extract metadata with Gemini:', err.message);
-        title = originalName.replace('.pdf', '');
-        abstract = `Uploaded PDF document: ${originalName}`;
-        authors = ['Uploaded User'];
-        year = new Date().getFullYear();
-        methodology = 'Unknown';
-        keyFindings = ['Document uploaded successfully'];
-        topics = ['Uploaded'];
-        keywords = [];
-      }
+      fileUrl = cloudinaryResult?.secure_url || '#';
 
-      // Real-world citation count via external scholarly lookup (0 if no match).
-      citations = await fetchCitationCount(title);
+      const m = metadata || {};
+      title = m.title || originalName.replace('.pdf', '');
+      abstract = m.abstract || `Uploaded PDF document: ${originalName}`;
+      authors = m.authors && m.authors.length > 0 ? m.authors : ['Uploaded User'];
+      year = m.year || new Date().getFullYear();
+      methodology = m.methodology || 'Unknown';
+      keyFindings = m.keyFindings && m.keyFindings.length > 0 ? m.keyFindings : ['Document uploaded successfully'];
+      topics = m.topics && m.topics.length > 0 ? m.topics : ['Uploaded'];
+      keywords = m.keywords && m.keywords.length > 0 ? m.keywords : topics;
+
+      // Citation lookup hits an external scholarly API — deferred to after the
+      // response (updated in the background) so it never blocks the upload.
+      citations = 0;
     } else {
       // Fallback to body properties (backward compatibility)
       const { tags } = req.body;
@@ -136,15 +130,24 @@ const uploadPaper = async (req, res, next) => {
 
     const createdPaper = await paper.save();
 
-    // Ingest into the RAG store. Failure must not fail the upload.
-    try {
-      const count = await ingestPaper(createdPaper._id, content, user._id);
-      console.log(`Ingested ${count} chunks for paper ${createdPaper._id}`);
-    } catch (ingestErr) {
-      console.error('RAG ingestion failed (paper still saved):', ingestErr.message);
+    // Respond immediately so the upload feels fast. The heavy work below runs
+    // in the background and must never touch the (already sent) response.
+    res.status(201).json(createdPaper);
+
+    // Background 1: RAG ingestion (chunk embeddings). Failure must not fail the
+    // upload — chat falls back to truncated content until chunks are ready.
+    if (content) {
+      ingestPaper(createdPaper._id, content, user._id)
+        .then((count) => console.log(`Ingested ${count} chunks for paper ${createdPaper._id}`))
+        .catch((ingestErr) => console.error('RAG ingestion failed (paper still saved):', ingestErr.message));
     }
 
-    res.status(201).json(createdPaper);
+    // Background 2: real-world citation count — patch the doc once it arrives.
+    if (req.file && title) {
+      fetchCitationCount(title)
+        .then((count) => (count ? Paper.updateOne({ _id: createdPaper._id }, { citations: count }) : null))
+        .catch((citeErr) => console.error('Citation lookup failed:', citeErr.message));
+    }
   } catch (error) {
     next(error);
   }

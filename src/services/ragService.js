@@ -46,13 +46,17 @@ function cosineSimilarity(a, b) {
  * SDK shape (v2.8.0): ai.models.embedContent({ model, contents }) resolves to
  * { embeddings: [{ values: number[] }, ...] }. Defensive against single-object shape.
  */
+// Embed chunks in bounded-concurrency batches instead of one-at-a-time. A long
+// paper produces dozens of chunks; sequential embedding was the dominant upload
+// cost. The cap keeps us under Gemini's per-minute request limits.
+const EMBED_CONCURRENCY = 10;
+
 async function embedTexts(texts, apiKey) {
   if (!apiKey) throw new Error('Embedding API key is not configured.');
   if (!Array.isArray(texts) || texts.length === 0) return [];
   const ai = new GoogleGenAI({ apiKey });
 
-  const out = [];
-  for (const text of texts) {
+  const embedOne = async (text) => {
     const res = await ai.models.embedContent({
       model: EMBED_MODEL,
       contents: text,
@@ -60,7 +64,15 @@ async function embedTexts(texts, apiKey) {
     });
     const vec = res?.embeddings?.[0]?.values || res?.embedding?.values;
     if (!vec) throw new Error('Embedding response missing values.');
-    out.push(vec);
+    return vec;
+  };
+
+  // Preserve input order while embedding each batch in parallel.
+  const out = new Array(texts.length);
+  for (let i = 0; i < texts.length; i += EMBED_CONCURRENCY) {
+    const batch = texts.slice(i, i + EMBED_CONCURRENCY);
+    const vecs = await Promise.all(batch.map(embedOne));
+    for (let j = 0; j < vecs.length; j++) out[i + j] = vecs[j];
   }
   return out;
 }
