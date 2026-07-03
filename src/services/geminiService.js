@@ -2,10 +2,13 @@ const { GoogleGenAI } = require('@google/genai');
 const { embedTexts, retrieveChunks, TOP_K } = require('./ragService');
 const { scoreToLevel } = require('./comprehensionService');
 
-// Separate keys isolate bursty ingestion from interactive chat quota.
+// Separate keys isolate bursty ingestion from interactive chat quota so heavy
+// uploads don't throttle (429-retry) interactive chat and slow its responses.
+// Chat stays on the primary key; ingestion prefers the ADDITIONAL_API_KEY.
 // Both fall back to the legacy GEMINI_API_KEY for backward compatibility.
 const CHAT_KEY = process.env.GEMINI_CHAT_KEY || process.env.GEMINI_API_KEY;
-const INGEST_KEY = process.env.GEMINI_INGEST_KEY || process.env.GEMINI_API_KEY;
+const INGEST_KEY =
+  process.env.GEMINI_INGEST_KEY || process.env.ADDITIONAL_API_KEY || process.env.GEMINI_API_KEY;
 
 const chatAI = new GoogleGenAI({ apiKey: CHAT_KEY });
 const ingestAI = new GoogleGenAI({ apiKey: INGEST_KEY });

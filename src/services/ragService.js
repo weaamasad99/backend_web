@@ -1,7 +1,10 @@
 const { GoogleGenAI } = require('@google/genai');
 const PaperChunk = require('../models/PaperChunk');
 
-const ingestKey = () => process.env.GEMINI_INGEST_KEY || process.env.GEMINI_API_KEY;
+// Ingestion prefers the ADDITIONAL_API_KEY so bursty embedding doesn't share
+// quota with interactive chat. Falls back to the legacy GEMINI_API_KEY.
+const ingestKey = () =>
+  process.env.GEMINI_INGEST_KEY || process.env.ADDITIONAL_API_KEY || process.env.GEMINI_API_KEY;
 
 // Tunable RAG constants — adjust here, used everywhere.
 const CHUNK_SIZE = 1000;   // chars per chunk
