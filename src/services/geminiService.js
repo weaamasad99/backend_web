@@ -37,6 +37,88 @@ const generateWithRetry = async (client, params, retries = 2) => {
   }
 };
 
+// Values that carry no meaning aren't worth a translation round-trip.
+const PLACEHOLDER_VALUES = new Set(['', 'Unknown', 'Unknown methodology']);
+
+/**
+ * Pick only the paper fields worth translating. Empty strings, placeholder
+ * values, and empty arrays are dropped so we don't ask Gemini to translate
+ * "Unknown". Strings are trimmed.
+ * @param {{title?:string, abstract?:string, methodology?:string, keyFindings?:string[]}} fields
+ * @returns {{title?:string, abstract?:string, methodology?:string, keyFindings?:string[]}}
+ */
+const filterTranslatableFields = (fields = {}) => {
+  const out = {};
+  for (const key of ['title', 'abstract', 'methodology']) {
+    const val = (fields[key] || '').trim();
+    if (val && !PLACEHOLDER_VALUES.has(val)) out[key] = val;
+  }
+  const findings = Array.isArray(fields.keyFindings)
+    ? fields.keyFindings.map((f) => (f || '').trim()).filter(Boolean)
+    : [];
+  if (findings.length > 0) out.keyFindings = findings;
+  return out;
+};
+
+/**
+ * Translate a paper's readable metadata into Hebrew via Gemini JSON mode.
+ * Runs on the ingest client (additional key) to keep chat quota free.
+ * Untranslatable/empty fields fall back to their originals.
+ * @param {{title?:string, abstract?:string, methodology?:string, keyFindings?:string[]}} fields
+ * @returns {Promise<{title:string, abstract:string, methodology:string, keyFindings:string[]}>}
+ */
+const translateToHebrew = async (fields = {}) => {
+  if (!INGEST_KEY) throw new Error('Gemini API key is not configured.');
+
+  const original = {
+    title: fields.title || '',
+    abstract: fields.abstract || '',
+    methodology: fields.methodology || '',
+    keyFindings: Array.isArray(fields.keyFindings) ? fields.keyFindings : [],
+  };
+
+  const translatable = filterTranslatableFields(fields);
+  if (Object.keys(translatable).length === 0) return original;
+
+  try {
+    const response = await generateWithRetry(ingestAI, {
+      model: MODEL,
+      contents: `Translate the JSON values of this academic paper metadata into Hebrew.
+Keep the JSON keys and structure identical. Translate naturally and academically.
+Keep technical acronyms and named entities (e.g. CNN, RNN, p-value, BERT) as-is where a Hebrew term would be unclear.
+
+${JSON.stringify(translatable)}`,
+      config: {
+        systemInstruction: 'You are an academic translator. Translate English paper metadata into fluent academic Hebrew, preserving meaning.',
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            title: { type: 'STRING' },
+            abstract: { type: 'STRING' },
+            methodology: { type: 'STRING' },
+            keyFindings: { type: 'ARRAY', items: { type: 'STRING' } },
+          },
+        },
+      },
+    });
+
+    const parsed = JSON.parse(response.text);
+    return {
+      title: parsed.title || original.title,
+      abstract: parsed.abstract || original.abstract,
+      methodology: parsed.methodology || original.methodology,
+      keyFindings:
+        Array.isArray(parsed.keyFindings) && parsed.keyFindings.length
+          ? parsed.keyFindings
+          : original.keyFindings,
+    };
+  } catch (error) {
+    console.error('Gemini Translation Error:', error);
+    throw new Error('Failed to translate paper');
+  }
+};
+
 /**
  * Extract structured metadata from raw paper text using Gemini JSON mode.
  * @param {string} paperText Raw text extracted from the PDF
@@ -228,4 +310,6 @@ module.exports = {
   extractPaperMetadata,
   generateSocraticResponse,
   assessComprehension,
+  filterTranslatableFields,
+  translateToHebrew,
 };
