@@ -61,6 +61,12 @@ const paperSchema = mongoose.Schema(
     suggestionsUpdatedAt: {
       type: Date,
     },
+    // Cached translations of the paper's readable text, keyed by language code.
+    // Shape: { he: { title, abstract, methodology, keyFindings, translatedAt } }
+    translations: {
+      type: Object,
+      default: {},
+    },
   },
   {
     timestamps: true,

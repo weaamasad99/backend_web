@@ -1,6 +1,6 @@
 const Paper = require('../models/Paper');
 const User = require('../models/User');
-const { generateSocraticResponse, extractPaperMetadata } = require('../services/geminiService');
+const { generateSocraticResponse, extractPaperMetadata, translateToHebrew } = require('../services/geminiService');
 const { uploadPDFToCloudinary } = require('../services/cloudinaryService');
 const { ingestPaper } = require('../services/ragService');
 const { fetchCitationCount } = require('../services/citationService');
@@ -302,6 +302,44 @@ const ingestPaperById = async (req, res, next) => {
   }
 };
 
+// @desc    Get (and cache) a Hebrew translation of a paper's readable text
+// @route   GET /api/papers/:id/translation?lang=he
+// @access  Private
+const getPaperTranslation = async (req, res, next) => {
+  try {
+    const lang = req.query.lang || 'he';
+    if (lang !== 'he') {
+      return res.status(400).json({ message: 'Only Hebrew (he) translation is supported.' });
+    }
+
+    const paper = await Paper.findById(req.params.id);
+    if (!paper) {
+      return res.status(404).json({ message: 'Paper not found' });
+    }
+
+    // Cache hit — return the stored translation, no Gemini call.
+    if (paper.translations && paper.translations.he) {
+      return res.json(paper.translations.he);
+    }
+
+    const translated = await translateToHebrew({
+      title: paper.title,
+      abstract: paper.abstract,
+      methodology: paper.methodology,
+      keyFindings: paper.keyFindings,
+    });
+
+    const stored = { ...translated, translatedAt: new Date() };
+    paper.translations = { ...(paper.translations || {}), he: stored };
+    paper.markModified('translations'); // Object type — tell Mongoose it changed.
+    await paper.save();
+
+    res.json(stored);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getPapers,
   getPaperById,
@@ -311,6 +349,7 @@ module.exports = {
   getPaperSuggestions,
   getSuggestionsForPapers,
   ingestPaperById,
+  getPaperTranslation,
 };
 
 

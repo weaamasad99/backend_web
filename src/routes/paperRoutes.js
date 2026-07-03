@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 
-const { getPapers, getPaperById, uploadPaper, deletePaper, queryPaper, getPaperSuggestions, getSuggestionsForPapers, ingestPaperById } = require('../controllers/paperController');
+const { getPapers, getPaperById, uploadPaper, deletePaper, queryPaper, getPaperSuggestions, getSuggestionsForPapers, ingestPaperById, getPaperTranslation } = require('../controllers/paperController');
 const { analyzePapers } = require('../controllers/analysisController');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -24,6 +24,9 @@ router.route('/:id')
 
 router.route('/:id/query')
   .post(protect, queryPaper);
+
+// Hebrew translation of the paper's readable text (cached in the Paper doc).
+router.get('/:id/translation', protect, getPaperTranslation);
 
 router.post('/:id/ingest', protect, ingestPaperById);
 
