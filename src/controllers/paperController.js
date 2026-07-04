@@ -344,10 +344,36 @@ const getPaperTranslation = async (req, res, next) => {
   }
 };
 
+// @desc    Update a paper's editable fields (topics / title) — lecturer library mgmt
+// @route   PUT /api/papers/:id
+// @access  Private
+const updatePaper = async (req, res, next) => {
+  try {
+    const paper = await Paper.findById(req.params.id);
+    if (!paper) {
+      res.status(404);
+      throw new Error('Paper not found');
+    }
+    if (Array.isArray(req.body.topics)) {
+      const topics = req.body.topics.map((t) => String(t).trim()).filter(Boolean);
+      paper.topics = topics;
+      paper.tags = topics; // topics and tags are used interchangeably elsewhere
+    }
+    if (typeof req.body.title === 'string' && req.body.title.trim()) {
+      paper.title = req.body.title.trim();
+    }
+    const updated = await paper.save();
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getPapers,
   getPaperById,
   uploadPaper,
+  updatePaper,
   deletePaper,
   queryPaper,
   getPaperSuggestions,
