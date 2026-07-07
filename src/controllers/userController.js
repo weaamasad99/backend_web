@@ -109,7 +109,7 @@ const loginUser = async (req, res, next) => {
 // @access  Private
 const getUserProfile = async (req, res, next) => {
   try {
-    const user = await User.findOne({ firebaseUid: req.user.uid });
+    const user = await User.findOne({ firebaseUid: req.user.uid }).populate('supervisor', 'name email institution');
 
     if (user) {
       res.json(user);
@@ -157,14 +157,18 @@ const updateUserProfile = async (req, res, next) => {
 const getStudents = async (req, res, next) => {
   try {
     const user = await User.findOne({ firebaseUid: req.user.uid });
-    
+
     if (!user || user.role !== 'lecturer') {
       res.status(403);
       throw new Error('Not authorized as a lecturer');
     }
 
-    const students = await User.find({ role: 'student' }).select('-firebaseUid -__v');
-    
+    const students = await User.find({ 
+      role: 'student',
+      supervisor: user._id,
+      supervisorStatus: { $in: ['pending', 'approved'] }
+    }).select('-firebaseUid -__v');
+
     const studentData = await Promise.all(students.map(async (student) => {
       const papersCount = await Paper.countDocuments({ uploadedBy: student._id });
       const chats = await Chat.find({ student: student._id }).sort({ updatedAt: -1 }).limit(1);
@@ -190,7 +194,7 @@ const getStudents = async (req, res, next) => {
         project: student.institution || 'Final Project',
         papersAnalyzed: papersCount,
         lastActive: lastActiveStr,
-        status: papersCount > 0 ? 'Active' : 'Review Needed',
+        status: student.supervisorStatus === 'pending' ? 'Pending' : (papersCount > 0 ? 'Active' : 'Review Needed'),
       };
     }));
 
@@ -242,6 +246,122 @@ const forgotPassword = async (req, res, next) => {
   }
 };
 
+// @desc    Search for a lecturer by email
+// @route   GET /api/users/search-lecturer
+// @access  Private (Student)
+const searchLecturer = async (req, res, next) => {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      res.status(400);
+      throw new Error('Please provide an email to search');
+    }
+
+    const lecturer = await User.findOne({ email, role: 'lecturer' }).select('name email institution');
+    
+    if (!lecturer) {
+      res.status(404);
+      throw new Error('Lecturer not found with that email');
+    }
+
+    res.json(lecturer);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Student requests a lecturer as supervisor
+// @route   POST /api/users/request-supervisor
+// @access  Private (Student)
+const requestSupervisor = async (req, res, next) => {
+  try {
+    const { lecturerId } = req.body;
+    
+    const user = await User.findOne({ firebaseUid: req.user.uid });
+    if (!user || user.role !== 'student') {
+      res.status(403);
+      throw new Error('Not authorized as a student');
+    }
+
+    const lecturer = await User.findById(lecturerId);
+    if (!lecturer || lecturer.role !== 'lecturer') {
+      res.status(404);
+      throw new Error('Lecturer not found');
+    }
+
+    user.supervisor = lecturer._id;
+    user.supervisorStatus = 'pending';
+    await user.save();
+
+    res.json({ message: 'Request sent successfully', supervisorStatus: 'pending' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Lecturer accepts a student's request
+// @route   PUT /api/users/accept-student/:id
+// @access  Private (Lecturer)
+const acceptStudent = async (req, res, next) => {
+  try {
+    const lecturer = await User.findOne({ firebaseUid: req.user.uid });
+    if (!lecturer || lecturer.role !== 'lecturer') {
+      res.status(403);
+      throw new Error('Not authorized as a lecturer');
+    }
+
+    const student = await User.findById(req.params.id);
+    if (!student || student.role !== 'student') {
+      res.status(404);
+      throw new Error('Student not found');
+    }
+
+    if (student.supervisor.toString() !== lecturer._id.toString()) {
+      res.status(403);
+      throw new Error('Student did not request you as a supervisor');
+    }
+
+    student.supervisorStatus = 'approved';
+    await student.save();
+
+    res.json({ message: 'Student approved successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Lecturer rejects a student's request
+// @route   PUT /api/users/reject-student/:id
+// @access  Private (Lecturer)
+const rejectStudent = async (req, res, next) => {
+  try {
+    const lecturer = await User.findOne({ firebaseUid: req.user.uid });
+    if (!lecturer || lecturer.role !== 'lecturer') {
+      res.status(403);
+      throw new Error('Not authorized as a lecturer');
+    }
+
+    const student = await User.findById(req.params.id);
+    if (!student || student.role !== 'student') {
+      res.status(404);
+      throw new Error('Student not found');
+    }
+
+    if (student.supervisor.toString() !== lecturer._id.toString()) {
+      res.status(403);
+      throw new Error('Student did not request you as a supervisor');
+    }
+
+    student.supervisorStatus = 'rejected';
+    student.supervisor = null;
+    await student.save();
+
+    res.json({ message: 'Student rejected successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
@@ -249,4 +369,8 @@ module.exports = {
   updateUserProfile,
   getStudents,
   forgotPassword,
+  searchLecturer,
+  requestSupervisor,
+  acceptStudent,
+  rejectStudent,
 };

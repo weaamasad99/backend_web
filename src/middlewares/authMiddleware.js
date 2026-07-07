@@ -27,7 +27,7 @@ const protect = async (req, res, next) => {
       // Normally you would also find the user in MongoDB here:
       // const User = require('../models/User');
       // req.user = await User.findOne({ firebaseUid: decodedToken.uid });
-      
+
       req.user = {
         uid: decodedToken.uid,
         email: decodedToken.email,

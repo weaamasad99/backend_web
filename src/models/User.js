@@ -49,6 +49,17 @@ const userSchema = mongoose.Schema(
       enum: [1, 2, 3],
       default: 2,
     },
+    // Supervisor Relationship (For Students)
+    supervisor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    supervisorStatus: {
+      type: String,
+      enum: ['none', 'pending', 'approved', 'rejected'],
+      default: 'none',
+    },
   },
   {
     timestamps: true,

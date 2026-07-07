@@ -1,6 +1,17 @@
 const express = require('express');
 const router = express.Router();
-const { loginUser, registerUser, getUserProfile, forgotPassword, updateUserProfile, getStudents } = require('../controllers/userController');
+const { 
+  loginUser, 
+  registerUser, 
+  getUserProfile, 
+  forgotPassword, 
+  updateUserProfile, 
+  getStudents,
+  searchLecturer,
+  requestSupervisor,
+  acceptStudent,
+  rejectStudent
+} = require('../controllers/userController');
 const { protect } = require('../middlewares/authMiddleware');
 const { authLimiter } = require('../middlewares/rateLimiter');
 
@@ -11,5 +22,11 @@ router.post('/forgot-password', authLimiter, forgotPassword);
 router.get('/profile', protect, getUserProfile);
 router.put('/profile', protect, updateUserProfile);
 router.get('/students', protect, getStudents);
+
+// Supervisor Routes
+router.get('/search-lecturer', protect, searchLecturer);
+router.post('/request-supervisor', protect, requestSupervisor);
+router.put('/accept-student/:id', protect, acceptStudent);
+router.put('/reject-student/:id', protect, rejectStudent);
 
 module.exports = router;
