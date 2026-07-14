@@ -24,6 +24,18 @@ const progressSchema = mongoose.Schema(
     lecturerFeedback: {
       type: String,
     },
+    // One-sentence AI justification of the comprehension score, shown to the
+    // lecturer via the "Why this score?" button.
+    rationale: {
+      type: String,
+      default: '',
+    },
+    // Cached Hebrew translation of `rationale`, produced lazily when a lecturer
+    // views the explanation while the UI is in Hebrew.
+    rationaleHe: {
+      type: String,
+      default: '',
+    },
   },
   {
     timestamps: true,

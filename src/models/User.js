@@ -49,7 +49,31 @@ const userSchema = mongoose.Schema(
       enum: [1, 2, 3],
       default: 2,
     },
-    // Supervisor Relationship (For Students)
+    // Paper-comparison criteria defined by a lecturer. Applied to every
+    // student this lecturer supervises; empty = students fall back to the
+    // default criteria (methodology + examined parameters).
+    comparisonCriteria: {
+      type: [String],
+      default: [],
+    },
+    // Supervisor Relationships (For Students) — a student may have several
+    // supervisors. Rejection/cancellation removes the entry from the array.
+    supervisors: [
+      {
+        lecturer: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          required: true,
+        },
+        status: {
+          type: String,
+          enum: ['pending', 'approved'],
+          default: 'pending',
+        },
+      },
+    ],
+    // Legacy single-supervisor fields — kept so existing documents load; folded
+    // into `supervisors` on profile read and then cleared.
     supervisor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

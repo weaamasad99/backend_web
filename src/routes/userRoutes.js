@@ -10,7 +10,9 @@ const {
   searchLecturer,
   requestSupervisor,
   acceptStudent,
-  rejectStudent
+  rejectStudent,
+  cancelSupervisorRequest,
+  setComparisonCriteria
 } = require('../controllers/userController');
 const { protect } = require('../middlewares/authMiddleware');
 const { authLimiter } = require('../middlewares/rateLimiter');
@@ -28,5 +30,7 @@ router.get('/search-lecturer', protect, searchLecturer);
 router.post('/request-supervisor', protect, requestSupervisor);
 router.put('/accept-student/:id', protect, acceptStudent);
 router.put('/reject-student/:id', protect, rejectStudent);
+router.delete('/cancel-supervisor-request/:lecturerId', protect, cancelSupervisorRequest);
+router.put('/comparison-criteria', protect, setComparisonCriteria);
 
 module.exports = router;

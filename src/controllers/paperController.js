@@ -12,8 +12,24 @@ const { PDFParse } = require('pdf-parse');
 // @access  Private
 const getPapers = async (req, res, next) => {
   try {
-    const papers = await Paper.find({}).select('-content'); // Exclude full content for listing
-    res.json(papers);
+    const user = await User.findOne({ firebaseUid: req.user.uid });
+    const papers = await Paper.find({})
+      .select('-content') // Exclude full content for listing
+      .populate('uploadedBy', 'name role');
+
+    // Flag each paper with who uploaded it, so the UI can distinguish
+    // lecturer course material from student uploads.
+    const result = papers.map((p) => {
+      const doc = p.toObject();
+      const uploader = doc.uploadedBy;
+      doc.uploaderRole = uploader?.role || 'student';
+      doc.uploaderName = uploader?.name || '';
+      doc.isMine = !!(user && uploader && uploader._id.toString() === user._id.toString());
+      doc.uploadedBy = uploader?._id;
+      return doc;
+    });
+
+    res.json(result);
   } catch (error) {
     next(error);
   }

@@ -80,12 +80,12 @@ const sendMessage = async (req, res, next) => {
         role: m.sender === 'user' ? 'user' : 'model',
         text: m.text,
       }));
-      const { score } = await assessComprehension(
+      const { score, rationale } = await assessComprehension(
         chat.paper.keywords || [],
         chat.paper.content || '',
         conversation
       );
-      progress = await upsertProgress(chat.student, chat.paper._id, score);
+      progress = await upsertProgress(chat.student, chat.paper._id, score, rationale);
     } catch (assessErr) {
       console.error('Comprehension assessment failed (chat reply still sent):', assessErr.message);
     }

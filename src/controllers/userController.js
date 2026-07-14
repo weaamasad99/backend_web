@@ -109,14 +109,29 @@ const loginUser = async (req, res, next) => {
 // @access  Private
 const getUserProfile = async (req, res, next) => {
   try {
-    const user = await User.findOne({ firebaseUid: req.user.uid }).populate('supervisor', 'name email institution');
+    const user = await User.findOne({ firebaseUid: req.user.uid });
 
-    if (user) {
-      res.json(user);
-    } else {
+    if (!user) {
       res.status(404);
       throw new Error('User not found');
     }
+
+    // Lazy migration: fold the legacy single-supervisor fields into the
+    // supervisors array so older documents keep their relationship.
+    if (user.supervisor && ['pending', 'approved'].includes(user.supervisorStatus)) {
+      const exists = user.supervisors.some(
+        (s) => s.lecturer.toString() === user.supervisor.toString()
+      );
+      if (!exists) {
+        user.supervisors.push({ lecturer: user.supervisor, status: user.supervisorStatus });
+      }
+      user.supervisor = null;
+      user.supervisorStatus = 'none';
+      await user.save();
+    }
+
+    await user.populate('supervisors.lecturer', 'name email institution');
+    res.json(user);
   } catch (error) {
     next(error);
   }
@@ -163,10 +178,13 @@ const getStudents = async (req, res, next) => {
       throw new Error('Not authorized as a lecturer');
     }
 
-    const students = await User.find({ 
+    const students = await User.find({
       role: 'student',
-      supervisor: user._id,
-      supervisorStatus: { $in: ['pending', 'approved'] }
+      $or: [
+        { supervisors: { $elemMatch: { lecturer: user._id, status: { $in: ['pending', 'approved'] } } } },
+        // Legacy documents not yet migrated to the supervisors array
+        { supervisor: user._id, supervisorStatus: { $in: ['pending', 'approved'] } },
+      ],
     }).select('-firebaseUid -__v');
 
     const studentData = await Promise.all(students.map(async (student) => {
@@ -187,6 +205,11 @@ const getStudents = async (req, res, next) => {
         lastActiveStr = `${diffHrs} hour${diffHrs > 1 ? 's' : ''} ago`;
       }
 
+      // Status of THIS lecturer's relationship with the student (array entry,
+      // falling back to the legacy single-supervisor fields).
+      const entry = student.supervisors.find((s) => s.lecturer.toString() === user._id.toString());
+      const relationStatus = entry ? entry.status : student.supervisorStatus;
+
       return {
         id: student._id,
         name: student.name,
@@ -194,7 +217,7 @@ const getStudents = async (req, res, next) => {
         project: student.institution || 'Final Project',
         papersAnalyzed: papersCount,
         lastActive: lastActiveStr,
-        status: student.supervisorStatus === 'pending' ? 'Pending' : (papersCount > 0 ? 'Active' : 'Review Needed'),
+        status: relationStatus === 'pending' ? 'Pending' : (papersCount > 0 ? 'Active' : 'Review Needed'),
       };
     }));
 
@@ -289,8 +312,17 @@ const requestSupervisor = async (req, res, next) => {
       throw new Error('Lecturer not found');
     }
 
-    user.supervisor = lecturer._id;
-    user.supervisorStatus = 'pending';
+    const already = user.supervisors.find((s) => s.lecturer.toString() === lecturer._id.toString());
+    if (already) {
+      res.status(409);
+      throw new Error(
+        already.status === 'approved'
+          ? 'This lecturer already supervises you'
+          : 'You already have a pending request to this lecturer'
+      );
+    }
+
+    user.supervisors.push({ lecturer: lecturer._id, status: 'pending' });
     await user.save();
 
     res.json({ message: 'Request sent successfully', supervisorStatus: 'pending' });
@@ -316,12 +348,13 @@ const acceptStudent = async (req, res, next) => {
       throw new Error('Student not found');
     }
 
-    if (student.supervisor.toString() !== lecturer._id.toString()) {
+    const entry = student.supervisors.find((s) => s.lecturer.toString() === lecturer._id.toString());
+    if (!entry) {
       res.status(403);
       throw new Error('Student did not request you as a supervisor');
     }
 
-    student.supervisorStatus = 'approved';
+    entry.status = 'approved';
     await student.save();
 
     res.json({ message: 'Student approved successfully' });
@@ -347,16 +380,80 @@ const rejectStudent = async (req, res, next) => {
       throw new Error('Student not found');
     }
 
-    if (student.supervisor.toString() !== lecturer._id.toString()) {
+    const entryIndex = student.supervisors.findIndex((s) => s.lecturer.toString() === lecturer._id.toString());
+    if (entryIndex === -1) {
       res.status(403);
       throw new Error('Student did not request you as a supervisor');
     }
 
-    student.supervisorStatus = 'rejected';
-    student.supervisor = null;
+    student.supervisors.splice(entryIndex, 1);
     await student.save();
 
     res.json({ message: 'Student rejected successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Lecturer saves their paper-comparison criteria
+// @route   PUT /api/users/comparison-criteria
+// @access  Private (Lecturer)
+const setComparisonCriteria = async (req, res, next) => {
+  try {
+    const user = await User.findOne({ firebaseUid: req.user.uid });
+    if (!user || user.role !== 'lecturer') {
+      res.status(403);
+      throw new Error('Not authorized as a lecturer');
+    }
+
+    const { criteria } = req.body;
+    if (!Array.isArray(criteria)) {
+      res.status(400);
+      throw new Error('criteria (array of strings) is required');
+    }
+
+    const cleaned = criteria
+      .map((c) => String(c).trim())
+      .filter((c) => c.length > 0)
+      .slice(0, 20);
+
+    // Targeted update ($set) instead of user.save() — full-document validation
+    // would fail on legacy accounts missing a now-required field (e.g. username).
+    await User.updateOne({ _id: user._id }, { $set: { comparisonCriteria: cleaned } });
+
+    res.json({ message: 'Criteria saved successfully', comparisonCriteria: cleaned });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Student cancels their own pending supervision request
+// @route   DELETE /api/users/cancel-supervisor-request/:lecturerId
+// @access  Private (Student)
+const cancelSupervisorRequest = async (req, res, next) => {
+  try {
+    const user = await User.findOne({ firebaseUid: req.user.uid });
+    if (!user || user.role !== 'student') {
+      res.status(403);
+      throw new Error('Not authorized as a student');
+    }
+
+    const entryIndex = user.supervisors.findIndex(
+      (s) => s.lecturer.toString() === req.params.lecturerId
+    );
+    if (entryIndex === -1) {
+      res.status(404);
+      throw new Error('No request to this lecturer');
+    }
+    if (user.supervisors[entryIndex].status !== 'pending') {
+      res.status(403);
+      throw new Error('Only pending requests can be cancelled');
+    }
+
+    user.supervisors.splice(entryIndex, 1);
+    await user.save();
+
+    res.json({ message: 'Request cancelled successfully' });
   } catch (error) {
     next(error);
   }
@@ -373,4 +470,6 @@ module.exports = {
   requestSupervisor,
   acceptStudent,
   rejectStudent,
+  cancelSupervisorRequest,
+  setComparisonCriteria,
 };

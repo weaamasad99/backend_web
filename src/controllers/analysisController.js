@@ -1,5 +1,10 @@
 const Paper = require('../models/Paper');
 const User = require('../models/User');
+const { comparePapers: geminiComparePapers } = require('../services/geminiService');
+
+// Criteria used when none of the student's approved supervisors defined any.
+const DEFAULT_CRITERIA = ['Methodology', 'Examined parameters'];
+const DIFFICULTY_CRITERION = 'Difficulty level';
 
 // Bucket a methodology string into one of four coarse categories.
 const classifyMethodology = (methodology = '') => {
@@ -153,4 +158,72 @@ const analyzePapers = async (req, res, next) => {
   }
 };
 
-module.exports = { analyzePapers };
+// @desc    AI comparison of papers by criteria (difficulty always included;
+//          supervisors' criteria when defined, defaults otherwise)
+// @route   POST /api/papers/compare
+// @access  Private
+const comparePapersByCriteria = async (req, res, next) => {
+  try {
+    const { paperIds, language = 'en' } = req.body;
+
+    if (!Array.isArray(paperIds) || paperIds.length < 2) {
+      res.status(400);
+      throw new Error('paperIds (array with at least 2 ids) is required');
+    }
+
+    const user = await User.findOne({ firebaseUid: req.user.uid });
+    if (!user) {
+      res.status(404);
+      throw new Error('User not found in DB');
+    }
+
+    // Union of criteria from the student's APPROVED supervisors. A lecturer
+    // comparing papers uses their own criteria.
+    let lecturerCriteria = [];
+    if (user.role === 'lecturer') {
+      lecturerCriteria = user.comparisonCriteria || [];
+    } else {
+      const approvedIds = (user.supervisors || [])
+        .filter((s) => s.status === 'approved')
+        .map((s) => s.lecturer);
+      if (approvedIds.length > 0) {
+        const lecturers = await User.find({ _id: { $in: approvedIds } }).select('comparisonCriteria');
+        const seen = new Set();
+        lecturers.forEach((l) =>
+          (l.comparisonCriteria || []).forEach((c) => {
+            const key = c.toLowerCase();
+            if (!seen.has(key)) {
+              seen.add(key);
+              lecturerCriteria.push(c);
+            }
+          })
+        );
+      }
+    }
+
+    const criteria = [
+      DIFFICULTY_CRITERION,
+      ...(lecturerCriteria.length > 0 ? lecturerCriteria : DEFAULT_CRITERIA),
+    ].filter((c, i, arr) => arr.findIndex((x) => x.toLowerCase() === c.toLowerCase()) === i);
+
+    const papers = await Paper.find({ _id: { $in: paperIds } })
+      .select('title abstract methodology keywords');
+    if (papers.length < 2) {
+      res.status(404);
+      throw new Error('At least 2 of the requested papers must exist');
+    }
+
+    const result = await geminiComparePapers(papers, criteria, language);
+
+    res.json({
+      criteria,
+      criteriaSource: lecturerCriteria.length > 0 ? 'supervisor' : 'default',
+      papers: result.papers,
+      difficultySummary: result.difficultySummary,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { analyzePapers, comparePapersByCriteria };

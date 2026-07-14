@@ -4,7 +4,7 @@ const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 
 const { getPapers, getPaperById, uploadPaper, updatePaper, deletePaper, queryPaper, getPaperSuggestions, getSuggestionsForPapers, ingestPaperById, getPaperTranslation } = require('../controllers/paperController');
-const { analyzePapers } = require('../controllers/analysisController');
+const { analyzePapers, comparePapersByCriteria } = require('../controllers/analysisController');
 const { protect } = require('../middlewares/authMiddleware');
 
 // Route: /api/papers
@@ -14,6 +14,9 @@ router.route('/')
 
 // Route: /api/papers/analysis  (declared before /:id so it is not shadowed)
 router.post('/analysis', protect, analyzePapers);
+
+// AI comparison by criteria (declared before /:id so it is not shadowed).
+router.post('/compare', protect, comparePapersByCriteria);
 
 // Suggestions for a chosen set of papers (declared before /:id).
 router.post('/suggestions', protect, getSuggestionsForPapers);

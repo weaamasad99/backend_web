@@ -51,12 +51,38 @@ function cosineSimilarity(a, b) {
 // cost. The cap keeps us under Gemini's per-minute request limits.
 const EMBED_CONCURRENCY = 10;
 
+/** True for transient Gemini errors worth retrying (503 overload / 429 quota). */
+function isTransientGeminiError(err) {
+  if (err && (err.status === 503 || err.status === 429)) return true;
+  try {
+    const status = JSON.parse(err.message).error?.status;
+    return status === 'UNAVAILABLE' || status === 'RESOURCE_EXHAUSTED';
+  } catch {
+    return false;
+  }
+}
+
+/** Retry fn on transient Gemini errors with linear backoff. */
+async function withGeminiRetry(fn, retries = 4, baseDelayMs = 2000) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (isTransientGeminiError(err) && attempt < retries) {
+        await new Promise((r) => setTimeout(r, baseDelayMs * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 async function embedTexts(texts, apiKey) {
   if (!apiKey) throw new Error('Embedding API key is not configured.');
   if (!Array.isArray(texts) || texts.length === 0) return [];
   const ai = new GoogleGenAI({ apiKey });
 
-  const embedOne = async (text) => {
+  const embedOne = (text) => withGeminiRetry(async () => {
     const res = await ai.models.embedContent({
       model: EMBED_MODEL,
       contents: text,
@@ -65,7 +91,7 @@ async function embedTexts(texts, apiKey) {
     const vec = res?.embeddings?.[0]?.values || res?.embedding?.values;
     if (!vec) throw new Error('Embedding response missing values.');
     return vec;
-  };
+  });
 
   // Preserve input order while embedding each batch in parallel.
   const out = new Array(texts.length);
@@ -110,6 +136,6 @@ async function retrieveChunks(paperId, queryEmbedding, k = TOP_K) {
 
 module.exports = {
   CHUNK_SIZE, CHUNK_OVERLAP, EMBED_MODEL, EMBED_DIMS, TOP_K,
-  chunkText, cosineSimilarity,
+  chunkText, cosineSimilarity, isTransientGeminiError, withGeminiRetry,
   embedTexts, ingestPaper, retrieveChunks,
 };
