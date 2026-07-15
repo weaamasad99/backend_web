@@ -1,18 +1,21 @@
 const Progress = require('../models/Progress');
 const User = require('../models/User');
 const { scoreToLevel } = require('../services/comprehensionService');
-const { translateStringToHebrew } = require('../services/geminiService');
+const { translateText } = require('../services/geminiService');
 
 /**
  * Insert or update a student's progress for a paper. Reusable from the chat hook.
  * @returns {Promise<{score:number, understandingLevel:string}>}
  */
-const upsertProgress = async (studentId, paperId, score, rationale = '') => {
+const upsertProgress = async (studentId, paperId, score, rationale) => {
   const understandingLevel = scoreToLevel(score);
+  const updateData = { score, understandingLevel };
+  if (rationale) {
+    updateData.rationale = rationale;
+  }
   await Progress.findOneAndUpdate(
     { student: studentId, paper: paperId },
-    // Clear the cached Hebrew translation whenever the rationale changes.
-    { score, understandingLevel, rationale, rationaleHe: '' },
+    updateData,
     { upsert: true, setDefaultsOnInsert: true }
   );
   return { score, understandingLevel, rationale };
@@ -28,7 +31,7 @@ const getMyProgress = async (req, res, next) => {
       res.status(404);
       throw new Error('User not found');
     }
-    const items = await Progress.find({ student: user._id }).select('paper score understandingLevel rationale');
+    const items = await Progress.find({ student: user._id }).select('paper score understandingLevel rationale rationaleHe');
     res.json(items);
   } catch (error) {
     next(error);
@@ -45,47 +48,43 @@ const getStudentProgress = async (req, res, next) => {
       res.status(401);
       throw new Error('Not authorized');
     }
-    const items = await Progress.find({ student: req.params.id }).select('paper score understandingLevel rationale');
+    const items = await Progress.find({ student: req.params.id }).select('paper score understandingLevel rationale rationaleHe');
     res.json(items);
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Hebrew translation of a comprehension-score rationale (cached)
+// @desc    Translate the rationale for a student's progress to Hebrew and cache it
 // @route   POST /api/progress/rationale-translation
-// @access  Private (lecturer, or the student themselves)
+// @access  Private
 const getRationaleTranslation = async (req, res, next) => {
   try {
-    const requester = await User.findOne({ firebaseUid: req.user.uid });
-    if (!requester) {
-      res.status(404);
-      throw new Error('User not found');
-    }
-
     const { studentId, paperId } = req.body;
     if (!studentId || !paperId) {
       res.status(400);
       throw new Error('studentId and paperId are required');
     }
 
-    // Only a lecturer or the student themselves may read the rationale.
-    if (requester.role !== 'lecturer' && requester._id.toString() !== studentId) {
-      res.status(401);
-      throw new Error('Not authorized');
+    const progress = await Progress.findOne({ student: studentId, paper: paperId });
+    if (!progress) {
+      res.status(404);
+      throw new Error('Progress record not found');
     }
 
-    const progress = await Progress.findOne({ student: studentId, paper: paperId });
-    if (!progress || !progress.rationale) {
+    if (progress.rationaleHe) {
+      return res.json({ rationaleHe: progress.rationaleHe });
+    }
+
+    if (!progress.rationale) {
       return res.json({ rationaleHe: '' });
     }
 
-    if (!progress.rationaleHe) {
-      progress.rationaleHe = await translateStringToHebrew(progress.rationale);
-      await progress.save();
-    }
+    const translated = await translateText(progress.rationale, 'Hebrew');
+    progress.rationaleHe = translated;
+    await progress.save();
 
-    res.json({ rationaleHe: progress.rationaleHe });
+    res.json({ rationaleHe: translated });
   } catch (error) {
     next(error);
   }

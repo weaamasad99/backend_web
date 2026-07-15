@@ -6,6 +6,7 @@ const { ingestPaper } = require('../services/ragService');
 const { fetchCitationCount } = require('../services/citationService');
 const { fetchPopularPapersByKeywords } = require('../services/suggestionService');
 const { PDFParse } = require('pdf-parse');
+const { GoogleGenAI } = require('@google/genai');
 
 // @desc    Get all papers
 // @route   GET /api/papers
@@ -322,45 +323,7 @@ const ingestPaperById = async (req, res, next) => {
   }
 };
 
-// @desc    Get (and cache) a Hebrew translation of a paper's readable text
-// @route   GET /api/papers/:id/translation?lang=he
-// @access  Private
-const getPaperTranslation = async (req, res, next) => {
-  try {
-    const lang = req.query.lang || 'he';
-    if (lang !== 'he') {
-      return res.status(400).json({ message: 'Only Hebrew (he) translation is supported.' });
-    }
-
-    const paper = await Paper.findById(req.params.id);
-    if (!paper) {
-      return res.status(404).json({ message: 'Paper not found' });
-    }
-
-    // Cache hit — return the stored translation, no Gemini call.
-    if (paper.translations && paper.translations.he) {
-      return res.json(paper.translations.he);
-    }
-
-    const translated = await translateToHebrew({
-      title: paper.title,
-      abstract: paper.abstract,
-      methodology: paper.methodology,
-      keyFindings: paper.keyFindings,
-    });
-
-    const stored = { ...translated, translatedAt: new Date() };
-    paper.translations = { ...(paper.translations || {}), he: stored };
-    paper.markModified('translations'); // Object type — tell Mongoose it changed.
-    await paper.save();
-
-    res.json(stored);
-  } catch (error) {
-    next(error);
-  }
-};
-
-// @desc    Update a paper's editable fields (topics / title) — lecturer library mgmt
+// @desc    Update editable fields of a paper (topics / title)
 // @route   PUT /api/papers/:id
 // @access  Private
 const updatePaper = async (req, res, next) => {
@@ -385,6 +348,198 @@ const updatePaper = async (req, res, next) => {
   }
 };
 
+// @desc    Compare multiple papers based on key criteria using Gemini JSON mode
+// @route   POST /api/papers/compare
+// @access  Private
+const comparePapers = async (req, res, next) => {
+  try {
+    const { paperIds, language = 'en' } = req.body;
+    if (!Array.isArray(paperIds) || paperIds.length === 0) {
+      res.status(400);
+      throw new Error('paperIds (non-empty array) is required');
+    }
+
+    const papers = await Paper.find({ _id: { $in: paperIds } }).select('title abstract methodology keyFindings');
+    if (papers.length === 0) {
+      res.status(404);
+      throw new Error('No papers found for the provided ids');
+    }
+
+    const papersDataText = papers.map((p, idx) => `
+Paper ${idx + 1}:
+ID: ${p._id}
+Title: ${p.title}
+Abstract: ${p.abstract || 'N/A'}
+Methodology: ${p.methodology || 'N/A'}
+Key Findings: ${(p.keyFindings || []).join('; ')}
+`).join('\n---\n');
+
+    const CHAT_KEY = process.env.GEMINI_CHAT_KEY || process.env.GEMINI_API_KEY;
+    if (!CHAT_KEY) {
+      res.status(500);
+      throw new Error('Gemini API key is not configured.');
+    }
+
+    const ai = new GoogleGenAI({ apiKey: CHAT_KEY, timeout: 300000 });
+    const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+
+    const criteria = ["Methodology Rigor", "Contribution Novelty", "Literature Coverage", "Practical Relevance", "Clarity of Writing"];
+
+    const prompt = `You are an academic evaluator. Compare the following papers and output a structured JSON analysis.
+    
+    Papers:
+    ${papersDataText}
+    
+    Instructions:
+    1. Score each paper on these criteria: ${criteria.join(', ')}.
+    2. Assign a score from 1 to 10 for each criterion.
+    3. Provide a brief explanation for each score.
+    4. Write a brief "difficultySummary" comparing the complexity of the papers for a student.
+    5. Write the response in English if the language is 'en', or Hebrew if the language is 'he'.`;
+
+    const response = await ai.models.generateContent({
+      model: MODEL,
+      contents: prompt,
+      config: {
+        systemInstruction: 'You are an academic evaluator comparing research papers. Return only JSON matching the schema.',
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            criteria: {
+              type: 'ARRAY',
+              items: { type: 'STRING' }
+            },
+            criteriaSource: { type: 'STRING', enum: ['supervisor', 'default'] },
+            papers: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  paperId: { type: 'STRING' },
+                  scores: {
+                    type: 'ARRAY',
+                    items: {
+                      type: 'OBJECT',
+                      properties: {
+                        criterion: { type: 'STRING', description: 'Name of the criterion (e.g. Methodology Rigor)' },
+                        score: { type: 'INTEGER', description: 'Score from 1 to 10' },
+                        explanation: { type: 'STRING', description: '1-sentence explanation' }
+                      },
+                      required: ['criterion', 'score', 'explanation']
+                    }
+                  }
+                },
+                required: ['paperId', 'scores']
+              }
+            },
+            difficultySummary: { type: 'STRING' }
+          },
+          required: ['criteria', 'criteriaSource', 'papers', 'difficultySummary']
+        }
+      }
+    });
+
+    const rawResult = JSON.parse(response.text);
+    
+    // Transform flat array of scores to the dictionary format expected by the frontend
+    const comparisonResult = {
+      criteria: rawResult.criteria,
+      criteriaSource: rawResult.criteriaSource,
+      difficultySummary: rawResult.difficultySummary,
+      papers: rawResult.papers.map(p => {
+        const scoresMap = {};
+        (p.scores || []).forEach(s => {
+          scoresMap[s.criterion] = {
+            score: s.score,
+            explanation: s.explanation
+          };
+        });
+        return {
+          paperId: p.paperId,
+          scores: scoresMap
+        };
+      })
+    };
+
+    res.json(comparisonResult);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Translate a paper's main details to the target language and cache them
+// @route   GET /api/papers/:id/translation
+// @access  Private
+const getPaperTranslation = async (req, res, next) => {
+  try {
+    const { lang = 'he' } = req.query;
+    const paper = await Paper.findById(req.params.id);
+    if (!paper) {
+      res.status(404);
+      throw new Error('Paper not found');
+    }
+
+    if (paper.translations && paper.translations[lang] && paper.translations[lang].title) {
+      return res.json(paper.translations[lang]);
+    }
+
+    const CHAT_KEY = process.env.GEMINI_CHAT_KEY || process.env.GEMINI_API_KEY;
+    if (!CHAT_KEY) {
+      res.status(500);
+      throw new Error('Gemini API key is not configured.');
+    }
+
+    const ai = new GoogleGenAI({ apiKey: CHAT_KEY });
+    const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+
+    const prompt = `Translate the following paper metadata fields to ${lang === 'he' ? 'Hebrew' : lang}.
+Title: ${paper.title}
+Abstract: ${paper.abstract || ''}
+Methodology: ${paper.methodology || ''}
+Key Findings: ${(paper.keyFindings || []).join('\n')}
+
+Output your translations in a structured JSON object matching the provided schema.`;
+
+    const response = await ai.models.generateContent({
+      model: MODEL,
+      contents: prompt,
+      config: {
+        systemInstruction: 'You are a professional translator. Return only JSON matching the schema.',
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            title: { type: 'STRING' },
+            abstract: { type: 'STRING' },
+            methodology: { type: 'STRING' },
+            keyFindings: {
+              type: 'ARRAY',
+              items: { type: 'STRING' }
+            }
+          },
+          required: ['title', 'abstract', 'methodology', 'keyFindings']
+        }
+      }
+    });
+
+    const translation = JSON.parse(response.text);
+    if (!paper.translations) {
+      paper.translations = {};
+    }
+    paper.translations[lang] = {
+      ...translation,
+      translatedAt: new Date(),
+    };
+    paper.markModified('translations');
+    await paper.save();
+
+    res.json(translation);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getPapers,
   getPaperById,
@@ -396,6 +551,7 @@ module.exports = {
   getSuggestionsForPapers,
   ingestPaperById,
   getPaperTranslation,
+  comparePapers,
 };
 
 

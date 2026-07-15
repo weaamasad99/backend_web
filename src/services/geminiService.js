@@ -299,107 +299,32 @@ ${transcript}`;
 };
 
 /**
- * Compare papers against a list of criteria using Gemini JSON mode.
- * Difficulty level must be included by the caller as one of the criteria.
- * @param {Array<{_id:any, title:string, abstract?:string, methodology?:string, keywords?:string[]}>} papers
- * @param {string[]} criteria  Criteria names, in display order.
- * @param {string} language    'he' for Hebrew explanations, otherwise English.
- * @returns {Promise<{papers: Array<{paperId:string, scores: Record<string,{score:number, explanation:string}>}>, difficultySummary: string}>}
+ * Translate a piece of text to a target language (default Hebrew) using Gemini.
+ * @param {string} text The text to translate
+ * @param {string} targetLang The target language name/code
+ * @returns {Promise<string>} The translated text
  */
-const comparePapers = async (papers, criteria, language = 'en') => {
-  if (!CHAT_KEY) throw new Error('Gemini chat key is not configured.');
-
-  const paperBlocks = papers
-    .map((p, i) => `[Paper ${i + 1}] id=${p._id}
-Title: ${p.title}
-Abstract: ${(p.abstract || '').substring(0, 1500)}
-Methodology: ${(p.methodology || 'Unknown').substring(0, 800)}
-Keywords: ${(p.keywords || []).slice(0, 20).join(', ')}`)
-    .join('\n\n');
-
-  const languageLine = language === 'he'
-    ? 'Write every explanation and the difficultySummary in Hebrew.'
-    : 'Write every explanation and the difficultySummary in English.';
-
-  const prompt = `Compare the following academic papers against these criteria: ${criteria.join(', ')}.
-For each paper, give each criterion a score from 1 to 10 (10 = highest/hardest/most rigorous) with a one-sentence explanation grounded in the paper's abstract, methodology, and keywords.
-Also write difficultySummary: 2-3 sentences comparing which paper is the most difficult to read and understand for a student, and why.
-${languageLine}
-
-${paperBlocks}`;
-
-  const response = await generateWithRetry(chatAI, {
-    model: MODEL,
-    contents: prompt,
-    config: {
-      systemInstruction: 'You are an academic reviewer producing structured paper comparisons. Return only the requested JSON.',
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: 'OBJECT',
-        properties: {
-          papers: {
-            type: 'ARRAY',
-            items: {
-              type: 'OBJECT',
-              properties: {
-                paperId: { type: 'STRING', description: 'The id given in the paper block' },
-                scores: {
-                  type: 'ARRAY',
-                  items: {
-                    type: 'OBJECT',
-                    properties: {
-                      criterion: { type: 'STRING', description: 'Criterion name exactly as given' },
-                      score: { type: 'INTEGER', description: 'Score 1-10' },
-                      explanation: { type: 'STRING', description: 'One sentence justifying the score' },
-                    },
-                    required: ['criterion', 'score', 'explanation'],
-                  },
-                },
-              },
-              required: ['paperId', 'scores'],
-            },
-          },
-          difficultySummary: { type: 'STRING', description: '2-3 sentences comparing overall difficulty' },
-        },
-        required: ['papers', 'difficultySummary'],
-      },
-    },
-  });
-
-  const parsed = JSON.parse(response.text);
-
-  // Normalize: array-of-scores -> map keyed by criterion, clamp scores 1-10.
-  const result = (parsed.papers || []).map((p) => {
-    const scores = {};
-    (p.scores || []).forEach((s) => {
-      scores[s.criterion] = {
-        score: Math.max(1, Math.min(10, Number(s.score) || 1)),
-        explanation: s.explanation || '',
-      };
-    });
-    return { paperId: p.paperId, scores };
-  });
-
-  return { papers: result, difficultySummary: parsed.difficultySummary || '' };
-};
-
-/**
- * Translate a short piece of text to Hebrew. Returns the original on failure
- * or when no key is configured. Used for the comprehension-score rationale.
- */
-const translateStringToHebrew = async (text) => {
-  if (!text || !CHAT_KEY) return text;
+const translateText = async (text, targetLang = 'Hebrew') => {
+  if (!text || !text.trim()) return '';
+  if (!CHAT_KEY) {
+    return text;
+  }
   try {
+    const prompt = `Translate the following text into ${targetLang}. Return ONLY the translation, with no extra commentary or formatting.
+Text to translate:
+${text}`;
+
     const response = await generateWithRetry(chatAI, {
       model: MODEL,
-      contents: `Translate the following text to Hebrew. Return only the Hebrew translation, with no quotes and no extra text.\n\n${text}`,
+      contents: prompt,
       config: {
-        systemInstruction: 'You are a professional translator. Output only the Hebrew translation of the given text.',
-      },
+        systemInstruction: `You are a professional translator. Translate the text accurately into ${targetLang}. Keep the original formatting and style. Return only the translated text.`,
+      }
     });
-    return (response.text || '').trim() || text;
+
+    return response.text?.trim() || text;
   } catch (error) {
-    console.error('Gemini rationale translation failed:', error.message);
+    console.error(`Gemini Translation Error (${targetLang}):`, error);
     return text;
   }
 };
@@ -410,6 +335,5 @@ module.exports = {
   assessComprehension,
   filterTranslatableFields,
   translateToHebrew,
-  comparePapers,
-  translateStringToHebrew,
+  translateText,
 };
