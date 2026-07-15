@@ -14,7 +14,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(globalLimiter);
 
 // Basic health check route
-app.get('/health', (req, res) => {
+app.get(['/health', '/healthz'], (req, res) => {
   res.status(200).json({ status: 'ok', message: 'Server is running' });
 });
 
